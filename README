@@ -1,8 +1,0 @@
-Before playing the TD-Algorithm must be trained. 
-
-Run 'python td_pong_train.py <#iterations>'. 10000 - 100000 iterations should be enough.
-Run 'python td_pong_play.py'
-
-To reset the training, remove all '.dat' files.
-
-Run 'python random_walker.py' to see the reference random walker playing.
