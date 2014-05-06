@@ -160,7 +160,8 @@ class Ball(sge.StellarClass):
             self.serve(1 if loser == 0 else -1)
             self.reward_lock[loser].acquire()
             if not self.reward_queue[loser].full():
-                self.reward_queue[loser].put(-abs(glob.ball.y - glob.players[loser].y) + 50)
+#                self.reward_queue[loser].put(-abs(glob.ball.y - glob.players[loser].y) + 50)
+                self.reward_queue[loser].put(-1)
             self.reward_lock[loser].release()
 
 
@@ -172,12 +173,6 @@ class Ball(sge.StellarClass):
             self.bbox_top = 0
             self.yvelocity = abs(self.yvelocity)
 
-    #		if not self.state_queue.empty():
-    #			self.state_lock.acquire()
-    #			self.state_queue.get()
-    #			self.state_queue.get()
-    #			self.state_queue.get()
-    #			self.state_lock.release()
         self.state_lock.acquire()
         if not self.state_queue.full():
             self.state_queue.put(glob.ball.x)
@@ -201,7 +196,7 @@ class Ball(sge.StellarClass):
 
             self.reward_lock[hitter].acquire()
             if not self.reward_queue[hitter].full():
-                self.reward_queue[hitter].put(100)
+                self.reward_queue[hitter].put(1)
             self.reward_lock[hitter].release()
 
     def serve(self, direction=1):
@@ -214,7 +209,9 @@ class Ball(sge.StellarClass):
 
 
 
-def main(players, action_lock, action_queue, reward_lock, reward_queue, state_lock, state_queue):
+def main(players, action_lock, action_queue, reward_lock, reward_queue, state_lock, state_queue, seed=None):
+    random.seed(seed)
+
     # Create Game object
     Game(640, 480, fps=120)
 

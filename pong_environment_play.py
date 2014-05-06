@@ -1,13 +1,12 @@
 import Queue
 import threading
-import time
 import pong
 
-import sys
-
 class PongGame(threading.Thread):
-    def __init__(self, players, bins=480):
+    def __init__(self, players, bins=480, seed=None):
         self.players = players
+        self.seed = seed
+
         self.action_queue = [Queue.Queue(1) for _ in range(2)]
         self.action_lock = [threading.Lock() for _ in range(2)]
 
@@ -24,7 +23,7 @@ class PongGame(threading.Thread):
 #        num_reward = 1
 #        num_punishment = 1
 #
-        self.state = [1, 0, 0] # ball_y, paddle[0], paddle[1]
+        self.state = [1, 0, 0] # ball_y, paddle0, paddle1
 #        last_outcomes = [0]
 
         threading.Thread.__init__(self)
@@ -42,8 +41,7 @@ class PongGame(threading.Thread):
         self.action_lock[player].acquire()
         if not self.action_queue[player].empty():
             self.action_queue[player].get()
-        if self.action_queue[player].empty():
-            self.action_queue[player].put(direction)
+        self.action_queue[player].put(direction)
         self.action_lock[player].release()
 
         self.reward_lock[player].acquire()
@@ -80,7 +78,8 @@ class PongGame(threading.Thread):
 
     def run(self):
         pong.main(self.players, self.action_lock, self.action_queue,
-                  self.reward_lock, self.reward_queue, self.state_lock, self.state_queue)
+                  self.reward_lock, self.reward_queue, self.state_lock, self.state_queue,
+                  seed=self.seed)
 
 
 
