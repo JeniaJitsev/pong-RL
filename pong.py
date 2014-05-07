@@ -18,11 +18,14 @@ import threading
 import numpy.random as random
 
 PADDLE_SPEED = 4
-COMPUTER_PADDLE_SPEED = 4
+COMPUTER_PADDLE_SPEED = 2
 PADDLE_VERTICAL_FORCE = 1 / 12
-BALL_START_SPEED = 4
+BALL_START_SPEED = 2
 BALL_ACCELERATION = 0.2
 BALL_MAX_SPEED = 15
+SIM_STEP = 0.001
+
+
 
 class glob:
     # This class is for global variables.  While not necessary, using a
@@ -36,7 +39,10 @@ class glob:
     bounce_wall_sound = None
     score_sound = None
     game_in_progress = True
+    sim_time = 0.0
 
+    hits = [0, 0]
+    misses = [0, 0]
 
 class Game(sge.Game):
 
@@ -66,6 +72,15 @@ class Game(sge.Game):
         # rather than having to unpause first.
         self.event_close()
 
+#    def event_step(self, t):
+#        if glob.sim_time % 0.01 <= 0.001:
+#            glob.hud_sprite.draw_clear()
+#            glob.hud_sprite.draw_text("hud", "%.2f" % glob.sim_time, sge.game.width / 2,
+#                                              0, color="white",
+#                                              halign=sge.ALIGN_RIGHT,
+#                                              valign=sge.ALIGN_TOP)
+
+
 class ComputerPlayer(sge.StellarClass):
     lock = None
     queue = None
@@ -91,15 +106,16 @@ class ComputerPlayer(sge.StellarClass):
         self.lock.acquire()
         while not self.queue.empty():
             move_direction = self.queue.get()
+#            if self.player_num == 1: # don't want to double count
+#                glob.sim_time += SIM_STEP
         self.lock.release()
         self.yvelocity = move_direction * COMPUTER_PADDLE_SPEED
 
         # Keep the paddle inside the window
-        if self.y < 0:
-            self.y = 0
-        elif self.y > sge.game.height:
-            self.y = sge.game.height
-
+        if self.bbox_top < 0:
+            self.bbox_top = 0
+        elif self.bbox_bottom > sge.game.height:
+            self.bbox_bottom = sge.game.height
 
 class Player(sge.StellarClass):
 
@@ -157,12 +173,15 @@ class Ball(sge.StellarClass):
             loser = 1
 
         if loser is not None:
+            glob.misses[loser] += 1
+
             self.serve(1 if loser == 0 else -1)
-            self.reward_lock[loser].acquire()
-            if not self.reward_queue[loser].full():
-#                self.reward_queue[loser].put(-abs(glob.ball.y - glob.players[loser].y) + 50)
-                self.reward_queue[loser].put(-1)
-            self.reward_lock[loser].release()
+
+#            self.reward_lock[loser].acquire()
+#            if not self.reward_queue[loser].full():
+##                self.reward_queue[loser].put(-abs(glob.ball.y - glob.players[loser].y) + 50)
+#                self.reward_queue[loser].put(-1)
+#            self.reward_lock[loser].release()
 
 
         # Bouncing off of the edges
@@ -194,6 +213,8 @@ class Ball(sge.StellarClass):
                 hitter = 1
             self.yvelocity += (self.y - other.y) * (PADDLE_VERTICAL_FORCE + 0.01)
 
+            glob.hits[hitter] += 1
+
             self.reward_lock[hitter].acquire()
             if not self.reward_queue[hitter].full():
                 self.reward_queue[hitter].put(1)
@@ -221,7 +242,7 @@ def main(players, action_lock, action_queue, reward_lock, reward_queue, state_lo
     paddle_sprite.draw_rectangle(0, 0, paddle_sprite.width,
                                  paddle_sprite.height, fill="white")
 
-    paddle_sprite_pc = sge.Sprite(ID="paddle_pc", width=8, height=40, origin_x=4,
+    paddle_sprite_pc = sge.Sprite(ID="paddle_pc", width=8, height=80, origin_x=4,
                                   origin_y=20)
     paddle_sprite_pc.draw_rectangle(0, 0, paddle_sprite.width,
                                  paddle_sprite.height, fill="white")
@@ -232,10 +253,18 @@ def main(players, action_lock, action_queue, reward_lock, reward_queue, state_lo
     ball_sprite.draw_rectangle(0, 0, ball_sprite.width, ball_sprite.height,
                                fill="white")
 
+    glob.hud_sprite = sge.Sprite(width=320, height=160, origin_x=160,
+                                 origin_y=0)
+    hud = sge.StellarClass(sge.game.width / 2, 0, -10, sprite=glob.hud_sprite,
+                           detects_collisions=False)
+
     # Load backgrounds
     layers = (sge.BackgroundLayer("ball", sge.game.width / 2, 0, -10000,
                                   xrepeat=False),)
     background = sge.Background (layers, "black")
+
+    # Load fonts
+    sge.Font('Liberation Mono', ID="hud", size=24)
 
     # Create objects
     for i in range(2):
@@ -244,7 +273,7 @@ def main(players, action_lock, action_queue, reward_lock, reward_queue, state_lo
                                          reward_lock[i], reward_queue[i], i)
     glob.ball = Ball(reward_lock, reward_queue, state_lock, state_queue)
 
-    objects = glob.players + [glob.ball]
+    objects = glob.players + [glob.ball, hud]
 
     # Create rooms
     room1 = sge.Room(objects, background=background)

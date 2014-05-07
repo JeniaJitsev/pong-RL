@@ -1,9 +1,14 @@
+import random
+import os
+import pickle
+
+import numpy as np
+
 import nengo
 from nengo.utils.distributions import Uniform
-import numpy as np
-import copy
-import random
+
 from pong_environment_play import PongGame
+import rl_pongplayer
 
 class DecoderPongPlayer(nengo.Network):
     def __init__(self, player, env, debug=False):
@@ -30,7 +35,8 @@ class DecoderPongPlayer(nengo.Network):
 
         input_node = nengo.Node(state_func)
         e = nengo.Ensemble(nengo.LIF(100), 2,
-                           intercepts=Uniform(0, 1))
+                           intercepts=Uniform(0, 1),
+                           radius=np.sqrt(2))
         output_node = nengo.Node(output_func, size_in=1)
 
         nengo.Connection(input_node, e)
@@ -83,33 +89,6 @@ class LearningPongPlayer(nengo.Network):
         # compare to actual control signal
         nengo.Connection(relay, error_ens, transform= -1)
 
-class TDErrorCalc:
-    def __init__(self, period, num_actions, discount):
-        self.period = period
-        self.saved_vals = [0 for _ in range(num_actions)]
-        self.reward = 0
-        self.discount = discount
-
-    def __call__(self, t, x):
-        self.reward += x[0]
-
-        if t % self.period <= 0.001:
-#            print t
-
-            vals = x[1:]
-
-            err = self.reward + self.discount * max(vals) - max(self.saved_vals)
-            self.err_sig = [err if i == np.argmax(self.saved_vals) else
-                            0 for i in range(len(self.saved_vals))]
-
-            print "%.2e %.2e %.2e %.2e" % (err, self.reward, max(vals), max(self.saved_vals))
-
-            self.reward = 0
-            self.saved_vals = copy.copy(vals)
-
-#            print "err %.2f %s" % (err, self.err_sig)
-        return self.err_sig
-
 class decoder_setter:
     def __init__(self, decoder_file):
         with open(decoder_file) as f:
@@ -123,125 +102,133 @@ class decoder_setter:
     def __call__(self, A, Y, rng=None):
         return self.decoders, []
 
-class RLPongPlayer(nengo.Network):
-    def __init__(self, player, env, decoder_solver=None, l_rate=1e-7):
-        num_actions = 3
-        self.state = (0, 0)
-        max_y = 480
-        period = 0.25
-        reward_scale = 0.0001
-
-        def output_func(t, x):
-            s, self.reward = env.move(x[0], player)
-            self.reward *= reward_scale
-            self.state = [2.0 * x / max_y - 1 for x in s]
-
-        def state_func(t):
-            return self.state
-
-        input_node = nengo.Node(state_func)
-        output_node = nengo.Node(output_func, size_in=1)
-
-        td_node = nengo.Node(TDErrorCalc(period, num_actions, 0.9),
-                             size_in=num_actions + 1, label="td_node")
-        td_relay = nengo.Node(size_in=num_actions)
-        nengo.Connection(td_node, td_relay)
-
-        reward_node = nengo.Node(lambda t: [self.reward])
-        nengo.Connection(reward_node, td_node[0])
-
-        self.vals = nengo.Ensemble(nengo.LIF(1000), 2,
-                              intercepts=Uniform(0, 1))
-        nengo.Connection(input_node, self.vals)
-
-        vals_relay = nengo.Node(size_in=num_actions)
-        self.learn_conn = nengo.Connection(self.vals, vals_relay,
-                                           function=lambda x: [0 for _ in range(num_actions)],
-                                           learning_rule=nengo.PES(td_relay, learning_rate=l_rate),
-                                           decoder_solver=decoder_solver,
-                                           synapse=0.01)
-
-        nengo.Connection(vals_relay, td_node[1:])
-
-        def action_func(t, x):
-            epsilon = 0.1
-            mapping = [[-1], [0], [1]]
-            if t % period <= 0.001:
-                if random.random() < epsilon:
-                    self.action = random.choice(mapping)
-                else:
-                    self.action = mapping[np.argmax(x)]
-            return self.action
-        action_node = nengo.Node(action_func, size_in=num_actions)
-        nengo.Connection(vals_relay, action_node)
-        nengo.Connection(action_node, output_node)
-
-        freq = 0.1
-        self.state_p = nengo.Probe(input_node, sample_every=freq)
-        self.vals_p = nengo.Probe(vals_relay, sample_every=freq)
-        self.reward_p = nengo.Probe(reward_node, sample_every=freq)
-        self.err_p = nengo.Probe(td_node, sample_every=freq)
-
-
 SEED = 0
+rng = random.Random()
+rng.seed(0)
 
 nengo.log()
 
 pong_game = PongGame(["computer", "computer"], seed=SEED)
 
-d_file = "decoders.txt"
+d_file = os.path.join("data", "decoders.txt")
 #d_solve = decoder_setter(d_file)
 d_solve = nengo.decoders.lstsq_L2nz
 
+l_rate = 1e-5
+discount = 0.95
+
 with nengo.Network() as net:
     p0 = DecoderPongPlayer(0, pong_game)
-    p1 = RLPongPlayer(1, pong_game, decoder_solver=d_solve,
-                      l_rate=1e-5)
+    p1 = rl_pongplayer.RLPongPlayer(1, pong_game, decoder_solver=d_solve,
+                                    l_rate=l_rate, discount=discount, rng=rng)
 
 
 pong_game.start()
 print "Pong started"
 
 sim = nengo.Simulator(net, seed=SEED)
-sim.run(1000)
+sim.run(500)
 print "done"
 
-if isinstance(d_solve, decoder_setter):
-    with open(d_file, "w") as f:
-        f.write("\n".join([" ".join([str(x) for x in row]) for row in
-                                    sim.signals[sim.model.sig_decoder[p1.learn_conn]].T]))
+# save decoders
+with open(d_file, "w") as f:
+    f.write("\n".join([" ".join([str(x) for x in row]) for row in
+                                sim.signals[sim.model.sig_decoder[p1.learn_conn]].T]))
 
+# save parameters and stats
+data = {"l_rate":l_rate,
+        "discount":discount,
+        "seed":SEED,
+        "threshold":p1.threshold,
+        "place_dev":p1.place_dev,
+        "sample_period":p1.period,
+        "stats":p1.stats}
 
-#print sim.data[p1.vals_p]
-#print np.shape(sim.data[p1.vals_p]), np.shape(sim.trange(p1.vals_p.sample_every))
-#print sim.signals['__time__'], sim.signals['__time__'] - sim.dt / 2
-#print sim.trange(p1.vals_p.sample_every)
+fname = os.path.join("data", "data_%s_%s_%s_%s.pkl" % (l_rate, discount, p1.threshold, SEED))
+with open(fname, "wb") as f:
+    pickle.dump(data, f)
+
 
 import matplotlib.pyplot as plt
+
+# plot values over time
 plt.figure()
 plt.plot(sim.trange(p1.vals_p.sample_every), sim.data[p1.vals_p])
+plt.legend(["up", "stay", "down"], loc="lower left")
+plt.title("vals")
+
+# plot error over time
+plt.figure()
+plt.plot(sim.trange(p1.err_p.sample_every), sim.data[p1.err_p])
+plt.legend(["up", "stay", "down"], loc="lower left")
+plt.title("error")
 
 #plt.figure()
-#plt.plot(sim.trange(p1.reward_p.sample_every), sim.data[p1.reward_p])
-#
-#plt.figure()
-#plt.plot(sim.trange(p1.err_p.sample_every), sim.data[p1.err_p])
+#plt.plot(sim.trange(p1.err_p.sample_every), sim.data[p1.err_p][:, 1])
+#plt.legend(["up", "stay", "down"], loc="lower left")
 
+# plot avg decoder by encoder direction
 plt.figure()
 enc = sim.model.params[p1.vals].encoders
 dec = sim.signals[sim.model.sig_decoder[p1.learn_conn]].T
 colours = [-1, 0, 1]
 colour_array = [np.dot(colours, d) for d in dec]
-plt.quiver(np.zeros(1000), np.zeros(1000), enc[:, 0], enc[:, 1],
-           colour_array, scale=2.5)
+#plt.quiver(np.zeros(1000), np.zeros(1000), enc[:, 0], enc[:, 1],
+#           colour_array, scale=2.5)
+plt.scatter([p1.placecells[np.argmax(e)][0] + rng.random() * 0.1 for e in enc],
+            [p1.placecells[np.argmax(e)][1] + rng.random() * 0.1 for e in enc],
+            c=colour_array)
+plt.title("vals arranged by encoder")
 
+# plot values when state is within some range
 plt.figure()
 state = sim.data[p1.state_p]
-pts = (state[:, 0] < -0.2) & (state[:, 0] > -0.5) & \
-    (state[:, 1] > 0.2) & (state[:, 1] < 0.5)
-plt.plot(sim.trange(p1.vals_p.sample_every)[pts],
-         sim.data[p1.vals_p][pts])
+#print np.shape(state)
+#print min(state[:, 0]), max(state[:, 1])
+#pts = (state[:, 0] < -0.2) & (state[:, 0] > -0.5) & \
+#    (state[:, 1] > 0.2) & (state[:, 1] < 0.5)
+pts = state[:, 0] < state[:, 1]
+data = sim.data[p1.vals_p].copy()
+data[~pts] = np.nan
+plt.plot(sim.trange(p1.vals_p.sample_every),
+         data)
+plt.xlim([0, max(sim.trange())])
+plt.legend(["up", "stay", "down"], loc="lower left")
+plt.title("vals when ball above paddle")
 
+# plot state
+plt.figure()
+plt.plot(sim.trange(p1.state_p.sample_every), sim.data[p1.state_p][:, :2])
+plt.legend(["ball", "paddle"])
+plt.title("state")
+
+# plot state spikes
+#from nengo.utils.matplotlib import rasterplot
+#plt.figure()
+#rasterplot(sim.trange(p1.val_spikes.sample_every), sim.data[p1.val_spikes])
+#plt.plot(sim.trange(p1.val_spikes.sample_every), sim.data[p1.val_spikes])
+
+# plot hits/misses
+plt.figure()
+#print np.shape(p1.stats), np.shape(sim.trange(0.25))
+plt.plot(sim.trange(p1.period), p1.stats[2:])
+plt.legend(["p1_hit", "p2_hit", "p1_miss", "p2_miss"], loc="upper left")
+plt.title("stats")
+
+# plot sparsity
+plt.figure()
+spikes = sim.data[p1.val_spikes]
+plt.plot(sim.trange(p1.val_spikes.sample_every),
+         [np.count_nonzero(s) / float(len(s)) for s in spikes])
+plt.title("sparsity")
+
+# plot values normalized to 0
+plt.figure()
+vals = sim.data[p1.vals_p]
+mins = np.min(vals, axis=1)
+plt.plot(sim.trange(p1.vals_p.sample_every), vals - np.tile(mins, (3, 1)).T)
+plt.legend(["up", "stay", "down"], loc="upper left")
+plt.title("normalized values")
 
 
 plt.show()

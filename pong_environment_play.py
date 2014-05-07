@@ -19,12 +19,8 @@ class PongGame(threading.Thread):
         self.world_dim = {'ball_y':bins, 'paddle': bins}
         self.num_possible_moves = 3
 
-#        global num_reward, num_punishment, state
-#        num_reward = 1
-#        num_punishment = 1
-#
         self.state = [1, 0, 0] # ball_y, paddle0, paddle1
-#        last_outcomes = [0]
+
 
         threading.Thread.__init__(self)
 
@@ -53,6 +49,8 @@ class PongGame(threading.Thread):
 
         return [self.getState(player), r]
 
+    def get_stats(self):
+        return pong.glob.hits + pong.glob.misses
 
     def update_state(self):
         self.state_lock.acquire()
