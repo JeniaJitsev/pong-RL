@@ -21,7 +21,7 @@ PADDLE_SPEED = 4
 COMPUTER_PADDLE_SPEED = 2
 PADDLE_VERTICAL_FORCE = 1 / 12
 BALL_START_SPEED = 2
-BALL_ACCELERATION = 0.2
+BALL_ACCELERATION = 0.0
 BALL_MAX_SPEED = 15
 SIM_STEP = 0.001
 
@@ -117,6 +117,11 @@ class ComputerPlayer(sge.StellarClass):
         elif self.bbox_bottom > sge.game.height:
             self.bbox_bottom = sge.game.height
 
+#        if self.y > sge.game.height:
+#            self.y = 0
+#        if self.y < 0:
+#            self.y = sge.game.height
+
 class Player(sge.StellarClass):
 
     def __init__(self, player_num):
@@ -177,20 +182,26 @@ class Ball(sge.StellarClass):
 
             self.serve(1 if loser == 0 else -1)
 
-#            self.reward_lock[loser].acquire()
-#            if not self.reward_queue[loser].full():
-##                self.reward_queue[loser].put(-abs(glob.ball.y - glob.players[loser].y) + 50)
-#                self.reward_queue[loser].put(-1)
-#            self.reward_lock[loser].release()
+            self.reward_lock[loser].acquire()
+            if not self.reward_queue[loser].full():
+#                self.reward_queue[loser].put(-abs(glob.ball.y - glob.players[loser].y) + 50)
+                self.reward_queue[loser].put(-1)
+            self.reward_lock[loser].release()
 
 
         # Bouncing off of the edges
         if self.bbox_bottom > sge.game.height:
             self.bbox_bottom = sge.game.height
-            self.yvelocity = -abs(self.yvelocity)
+            self.yvelocity = -abs(self.yvelocity) * 0.25
+#            self.yvelocity = 0
         elif self.bbox_top < 0:
             self.bbox_top = 0
-            self.yvelocity = abs(self.yvelocity)
+            self.yvelocity = abs(self.yvelocity) * 0.25
+#            self.yvelocity = 0
+#        if self.y > sge.game.height:
+#            self.y = 0
+#        if self.y < 0:
+#            self.y = sge.game.height
 
         self.state_lock.acquire()
         if not self.state_queue.full():
@@ -221,8 +232,8 @@ class Ball(sge.StellarClass):
             self.reward_lock[hitter].release()
 
     def serve(self, direction=1):
-        self.x = sge.game.width / 2 + (100 if direction == -1 else -100)
-        self.y = random.randint(40, 440)
+        self.x = sge.game.width / 2 + (200 if direction == -1 else -200)
+        self.y = random.randint(0, sge.game.height)
 
         # Next round
         self.xvelocity = BALL_START_SPEED * direction

@@ -11,7 +11,7 @@ from pong_environment_play import PongGame
 import rl_pongplayer
 
 class DecoderPongPlayer(nengo.Network):
-    def __init__(self, player, env, debug=False):
+    def __init__(self, player, env, debug=False, opposite=False, noise=0.0):
         self.state = (0, 0)
         self.debug = debug
         max_y = 480
@@ -20,12 +20,13 @@ class DecoderPongPlayer(nengo.Network):
             s, _ = env.move(x[0], player)
 #            print "env_state", s
             self.state = [2.0 * x / max_y - 1 for x in s]
+            self.state[0] += (random.random() * 2 - 1) * noise
 
         def direction_func(x):
             if x[0] < x[1]:
-                return [-1]
+                return [1] if opposite else [-1]
             if x[0] > x[1]:
-                return [1]
+                return [-1] if opposite else [1]
             return [0]
 
         def state_func(t):
@@ -102,32 +103,31 @@ class decoder_setter:
     def __call__(self, A, Y, rng=None):
         return self.decoders, []
 
-SEED = 0
+SEED = 1
 rng = random.Random()
-rng.seed(0)
+rng.seed(SEED)
 
 nengo.log()
 
 pong_game = PongGame(["computer", "computer"], seed=SEED)
 
-d_file = os.path.join("data", "decoders.txt")
+l_rate = 5e-5
+discount = 0.97
+
+d_file = os.path.join("data", "decoders_%s_%s_%s.txt" % (l_rate, discount, SEED))
 #d_solve = decoder_setter(d_file)
 d_solve = nengo.decoders.lstsq_L2nz
 
-l_rate = 1e-5
-discount = 0.95
-
 with nengo.Network() as net:
-    p0 = DecoderPongPlayer(0, pong_game)
+    p0 = DecoderPongPlayer(0, pong_game, opposite=True, noise=0.1)
     p1 = rl_pongplayer.RLPongPlayer(1, pong_game, decoder_solver=d_solve,
                                     l_rate=l_rate, discount=discount, rng=rng)
-
 
 pong_game.start()
 print "Pong started"
 
 sim = nengo.Simulator(net, seed=SEED)
-sim.run(500)
+sim.run(1000)
 print "done"
 
 # save decoders
@@ -178,7 +178,31 @@ colour_array = [np.dot(colours, d) for d in dec]
 plt.scatter([p1.placecells[np.argmax(e)][0] + rng.random() * 0.1 for e in enc],
             [p1.placecells[np.argmax(e)][1] + rng.random() * 0.1 for e in enc],
             c=colour_array)
-plt.title("vals arranged by encoder")
+plt.title("action vals arranged by encoder")
+
+# plot max val by encoder direction
+plt.figure()
+#colour_array = [max(d) for d in dec]
+#plt.scatter([p1.placecells[np.argmax(e)][0] + rng.random() * 0.1 for e in enc],
+#            [p1.placecells[np.argmax(e)][1] + rng.random() * 0.1 for e in enc],
+#            c=colour_array, vmin=np.mean(colour_array) * 0.25, vmax=np.mean(colour_array) * 1.75)
+Z = np.zeros((100, 100))
+radius = p1.state_radius
+#for i in range(min(1000, len(sim.data[p1.state_p]))):
+#    x = int(100 / (2 * radius) * (sim.data[p1.state_p][-i][0] + radius))
+#    y = int(100 / (2 * radius) * (sim.data[p1.state_p][-i][1] + radius))
+#    v = max(sim.data[p1.vals_p][-i])
+#    Z[x][y] = v
+indices = (100 / (2 * radius) * (sim.data[p1.state_p][:, :2] + radius)).astype(int)
+#print np.max(sim.data[p1.vals_p], axis=1)
+Z[indices[:, 0], indices[:, 1]] = np.max(sim.data[p1.vals_p], axis=1)
+
+plt.contour(np.linspace(-radius, radius, 100),
+            np.linspace(-radius, radius, 100),
+            Z)
+plt.title("max vals arranged by location")
+plt.xlabel("paddle")
+plt.ylabel("ball")
 
 # plot values when state is within some range
 plt.figure()

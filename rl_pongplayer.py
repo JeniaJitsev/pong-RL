@@ -14,25 +14,34 @@ class RLPongPlayer(nengo.Network):
         max_y = 480
         self.period = 0.1
         neuron = nengo.LIFRate
-        self.place_dev = 0.15
+        self.place_dev = 0.2
         self.rng = rng
         self.stats = []
         self.threshold = 0.0
         self.reward = 0
+        self.last_reward = 0
+        self.state_radius = 0.9
 
-        self.placecells = np.asarray(self.gen_placecells(min_spread=self.place_dev))
+        self.placecells = np.asarray(self.gen_placecells(min_spread=self.place_dev * 0.5))
         print "placecells", len(self.placecells)
 
 
         def output_func(t, x):
             mapping = [-1, 0, 1]
             action = mapping[int(round(x[0]))]
-            s, self.reward = env.move(action, player)
-            self.state = [2.0 * x / max_y - 1 for x in s]
+            s, r = env.move(action, player)
+            if abs(r) > 0.1:
+                self.reward = r if (r > 0 or self.last_reward < 0) else 0
+                # we skip single punishments, to try to minimize accidental
+                # punishment
+                self.last_reward = r
+            else:
+                self.reward = 0
+            self.state = [2 * self.state_radius * x / max_y - self.state_radius for x in s]
 
         def state_func(t):
-            tmp = np.append(self.state, self.calc_activations(self.state, self.place_dev))
-            return tmp
+            return np.append(self.state, self.calc_activations(self.state, self.place_dev))
+
 
         input_node = nengo.Node(state_func)
         output_node = nengo.Node(output_func, size_in=1)
@@ -45,13 +54,13 @@ class RLPongPlayer(nengo.Network):
         reward_node = nengo.Node(lambda t: [self.reward])
         nengo.Connection(reward_node, td_node[0])
 
-        N = 1000
+        N = 1500
         self.vals = nengo.Ensemble(neuron(N), len(self.placecells),
                                   intercepts=Uniform(self.threshold, 1),
                                   encoders=self.gen_encoders(N),
                                   eval_points=[self.calc_activations(self.random_location(),
                                                                      self.place_dev)
-                                               for _ in range(len(self.placecells) * 50)],
+                                               for _ in range(len(self.placecells) * 10)],
                                    radius=2)
         nengo.Connection(input_node[2:], self.vals)
 
@@ -68,19 +77,19 @@ class RLPongPlayer(nengo.Network):
             if t % self.period <= 0.001:
 #                print "updating action", t
 
-#                epsilon = 0.1
-#                if rng.random() < epsilon:
-#                    self.action = rng.randint(0, len(x) - 1)
-#                else:
-#                    self.action = np.argmax(x)
+                epsilon = 0.1
+                if rng.random() < epsilon:
+                    self.action = rng.randint(0, len(x) - 1)
+                else:
+                    self.action = np.argmax(x)
 
-                es = np.exp(x) / sum(np.exp(x))
-                pick = rng.random()
-                for i, e in enumerate(es):
-                    pick -= e
-                    if pick <= 0:
-                        self.action = i
-                        break
+#                es = np.exp(x) / sum(np.exp(x))
+#                pick = rng.random()
+#                for i, e in enumerate(es):
+#                    pick -= e
+#                    if pick <= 0:
+#                        self.action = i
+#                        break
 
                 self.stats.append(env.get_stats())
             return self.action
@@ -97,7 +106,10 @@ class RLPongPlayer(nengo.Network):
         self.val_spikes = nengo.Probe(self.vals.neurons, "output", sample_every=0.1)
 
     def calc_activations(self, loc, place_dev):
-        dists = np.sqrt(np.sum((self.placecells - np.array(loc)) ** 2, axis=1))
+        dists = np.sqrt(np.sum(((self.placecells - np.array(loc)) ** 2), axis=1))
+#        dists_old = np.asarray([self.calc_dist(p, loc) for p in self.placecells])
+#        print "dists", dists
+#        print "dists_old", dists_old
         return np.exp(-dists ** 2 / (2 * place_dev ** 2))
 
     def gen_placecells(self, min_spread=0.2):
