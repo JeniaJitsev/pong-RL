@@ -30,13 +30,14 @@ class RLPongPlayer(nengo.Network):
             mapping = [-1, 0, 1]
             action = mapping[int(round(x[0]))]
             s, r = env.move(action, player)
-            if abs(r) > 0.1:
-                self.reward = r if (r > 0 or self.last_reward < 0) else 0
-                # we skip single punishments, to try to minimize accidental
-                # punishment
-                self.last_reward = r
-            else:
-                self.reward = 0
+#            if abs(r) > 0.1:
+#                self.reward = r if (r > 0 or self.last_reward < 0) else 0
+#                # we skip single punishments, to try to minimize accidental
+#                # punishment
+#                self.last_reward = r
+#            else:
+#                self.reward = 0
+            self.reward = r
             self.state = [2 * self.state_radius * x / max_y - self.state_radius for x in s]
 
         def state_func(t):

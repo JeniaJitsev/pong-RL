@@ -17,11 +17,11 @@ import Queue
 import threading
 import numpy.random as random
 
-PADDLE_SPEED = 4
+PADDLE_SPEED = 2
 COMPUTER_PADDLE_SPEED = 2
 PADDLE_VERTICAL_FORCE = 1 / 12
 BALL_START_SPEED = 2
-BALL_ACCELERATION = 0.0
+BALL_ACCELERATION = 0.1
 BALL_MAX_SPEED = 15
 SIM_STEP = 0.001
 
@@ -192,11 +192,11 @@ class Ball(sge.StellarClass):
         # Bouncing off of the edges
         if self.bbox_bottom > sge.game.height:
             self.bbox_bottom = sge.game.height
-            self.yvelocity = -abs(self.yvelocity) * 0.25
+            self.yvelocity = -abs(self.yvelocity) * 0.75
 #            self.yvelocity = 0
         elif self.bbox_top < 0:
             self.bbox_top = 0
-            self.yvelocity = abs(self.yvelocity) * 0.25
+            self.yvelocity = abs(self.yvelocity) * 0.75
 #            self.yvelocity = 0
 #        if self.y > sge.game.height:
 #            self.y = 0
@@ -248,13 +248,13 @@ def main(players, action_lock, action_queue, reward_lock, reward_queue, state_lo
     Game(640, 480, fps=120)
 
     # Load sprites
-    paddle_sprite = sge.Sprite(ID="paddle", width=8, height=120, origin_x=4,
-                               origin_y=60)
+    paddle_sprite = sge.Sprite(ID="paddle", width=8, height=80, origin_x=4,
+                               origin_y=40)
     paddle_sprite.draw_rectangle(0, 0, paddle_sprite.width,
                                  paddle_sprite.height, fill="white")
 
     paddle_sprite_pc = sge.Sprite(ID="paddle_pc", width=8, height=80, origin_x=4,
-                                  origin_y=20)
+                                  origin_y=40)
     paddle_sprite_pc.draw_rectangle(0, 0, paddle_sprite.width,
                                  paddle_sprite.height, fill="white")
 
@@ -264,18 +264,18 @@ def main(players, action_lock, action_queue, reward_lock, reward_queue, state_lo
     ball_sprite.draw_rectangle(0, 0, ball_sprite.width, ball_sprite.height,
                                fill="white")
 
-    glob.hud_sprite = sge.Sprite(width=320, height=160, origin_x=160,
-                                 origin_y=0)
-    hud = sge.StellarClass(sge.game.width / 2, 0, -10, sprite=glob.hud_sprite,
-                           detects_collisions=False)
+#    glob.hud_sprite = sge.Sprite(width=320, height=160, origin_x=160,
+#                                 origin_y=0)
+#    hud = sge.StellarClass(sge.game.width / 2, 0, -10, sprite=glob.hud_sprite,
+#                           detects_collisions=False)
 
     # Load backgrounds
     layers = (sge.BackgroundLayer("ball", sge.game.width / 2, 0, -10000,
                                   xrepeat=False),)
     background = sge.Background (layers, "black")
 
-    # Load fonts
-    sge.Font('Liberation Mono', ID="hud", size=24)
+#    # Load fonts
+#    sge.Font('Liberation Mono', ID="hud", size=24)
 
     # Create objects
     for i in range(2):
@@ -284,7 +284,7 @@ def main(players, action_lock, action_queue, reward_lock, reward_queue, state_lo
                                          reward_lock[i], reward_queue[i], i)
     glob.ball = Ball(reward_lock, reward_queue, state_lock, state_queue)
 
-    objects = glob.players + [glob.ball, hud]
+    objects = glob.players + [glob.ball]
 
     # Create rooms
     room1 = sge.Room(objects, background=background)

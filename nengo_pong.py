@@ -20,7 +20,8 @@ class DecoderPongPlayer(nengo.Network):
             s, _ = env.move(x[0], player)
 #            print "env_state", s
             self.state = [2.0 * x / max_y - 1 for x in s]
-            self.state[0] += (random.random() * 2 - 1) * noise
+            if noise is not None:
+                self.state[0] += np.random.normal(scale=noise)
 
         def direction_func(x):
             if x[0] < x[1]:
@@ -114,12 +115,13 @@ pong_game = PongGame(["computer", "computer"], seed=SEED)
 l_rate = 5e-5
 discount = 0.97
 
-d_file = os.path.join("data", "decoders_%s_%s_%s.txt" % (l_rate, discount, SEED))
-#d_solve = decoder_setter(d_file)
-d_solve = nengo.decoders.lstsq_L2nz
+#d_file = os.path.join("data", "decoders_%s_%s_%s.txt" % (l_rate, discount, SEED))
+d_file = os.path.join("data", "decoders_best.txt")
+d_solve = decoder_setter(d_file)
+#d_solve = nengo.decoders.lstsq_L2nz
 
 with nengo.Network() as net:
-    p0 = DecoderPongPlayer(0, pong_game, opposite=True, noise=0.1)
+    p0 = DecoderPongPlayer(0, pong_game, opposite=True, noise=None)
     p1 = rl_pongplayer.RLPongPlayer(1, pong_game, decoder_solver=d_solve,
                                     l_rate=l_rate, discount=discount, rng=rng)
 
@@ -127,13 +129,13 @@ pong_game.start()
 print "Pong started"
 
 sim = nengo.Simulator(net, seed=SEED)
-sim.run(1000)
+sim.run(2000)
 print "done"
 
 # save decoders
-with open(d_file, "w") as f:
-    f.write("\n".join([" ".join([str(x) for x in row]) for row in
-                                sim.signals[sim.model.sig_decoder[p1.learn_conn]].T]))
+#with open(d_file, "w") as f:
+#    f.write("\n".join([" ".join([str(x) for x in row]) for row in
+#                                sim.signals[sim.model.sig_decoder[p1.learn_conn]].T]))
 
 # save parameters and stats
 data = {"l_rate":l_rate,
@@ -156,12 +158,16 @@ plt.figure()
 plt.plot(sim.trange(p1.vals_p.sample_every), sim.data[p1.vals_p])
 plt.legend(["up", "stay", "down"], loc="lower left")
 plt.title("vals")
+plt.xlabel("time")
+plt.ylabel("action value")
 
 # plot error over time
 plt.figure()
 plt.plot(sim.trange(p1.err_p.sample_every), sim.data[p1.err_p])
 plt.legend(["up", "stay", "down"], loc="lower left")
 plt.title("error")
+plt.xlabel("time")
+plt.ylabel("error")
 
 #plt.figure()
 #plt.plot(sim.trange(p1.err_p.sample_every), sim.data[p1.err_p][:, 1])
@@ -177,8 +183,11 @@ colour_array = [np.dot(colours, d) for d in dec]
 #           colour_array, scale=2.5)
 plt.scatter([p1.placecells[np.argmax(e)][0] + rng.random() * 0.1 for e in enc],
             [p1.placecells[np.argmax(e)][1] + rng.random() * 0.1 for e in enc],
-            c=colour_array)
+            c=colour_array,
+            vmin=np.mean(colour_array) * 0.25, vmax=np.mean(colour_array) * 1.75)
 plt.title("action vals arranged by encoder")
+plt.xlabel("ball")
+plt.ylabel("paddle")
 
 # plot max val by encoder direction
 plt.figure()
@@ -188,13 +197,7 @@ plt.figure()
 #            c=colour_array, vmin=np.mean(colour_array) * 0.25, vmax=np.mean(colour_array) * 1.75)
 Z = np.zeros((100, 100))
 radius = p1.state_radius
-#for i in range(min(1000, len(sim.data[p1.state_p]))):
-#    x = int(100 / (2 * radius) * (sim.data[p1.state_p][-i][0] + radius))
-#    y = int(100 / (2 * radius) * (sim.data[p1.state_p][-i][1] + radius))
-#    v = max(sim.data[p1.vals_p][-i])
-#    Z[x][y] = v
 indices = (100 / (2 * radius) * (sim.data[p1.state_p][:, :2] + radius)).astype(int)
-#print np.max(sim.data[p1.vals_p], axis=1)
 Z[indices[:, 0], indices[:, 1]] = np.max(sim.data[p1.vals_p], axis=1)
 
 plt.contour(np.linspace(-radius, radius, 100),
@@ -219,12 +222,16 @@ plt.plot(sim.trange(p1.vals_p.sample_every),
 plt.xlim([0, max(sim.trange())])
 plt.legend(["up", "stay", "down"], loc="lower left")
 plt.title("vals when ball above paddle")
+plt.xlabel("time")
+plt.ylabel("action value")
 
 # plot state
 plt.figure()
 plt.plot(sim.trange(p1.state_p.sample_every), sim.data[p1.state_p][:, :2])
 plt.legend(["ball", "paddle"])
 plt.title("state")
+plt.xlabel("time")
+plt.ylabel("position")
 
 # plot state spikes
 #from nengo.utils.matplotlib import rasterplot
@@ -238,6 +245,8 @@ plt.figure()
 plt.plot(sim.trange(p1.period), p1.stats[2:])
 plt.legend(["p1_hit", "p2_hit", "p1_miss", "p2_miss"], loc="upper left")
 plt.title("stats")
+plt.xlabel("time")
+plt.ylabel("count")
 
 # plot sparsity
 plt.figure()
@@ -245,6 +254,8 @@ spikes = sim.data[p1.val_spikes]
 plt.plot(sim.trange(p1.val_spikes.sample_every),
          [np.count_nonzero(s) / float(len(s)) for s in spikes])
 plt.title("sparsity")
+plt.xlabel("time")
+plt.ylabel("neurons active")
 
 # plot values normalized to 0
 plt.figure()
@@ -253,6 +264,8 @@ mins = np.min(vals, axis=1)
 plt.plot(sim.trange(p1.vals_p.sample_every), vals - np.tile(mins, (3, 1)).T)
 plt.legend(["up", "stay", "down"], loc="upper left")
 plt.title("normalized values")
+plt.xlabel("time")
+plt.ylabel("action value")
 
 
 plt.show()
