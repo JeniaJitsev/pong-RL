@@ -1,3 +1,4 @@
+import visualiser.visualiser_modes as modes
 from spike_source_poisson_dynamic import SpikeSourcePoissonDynamic
 from pacman103.core.spinnman.sdp.sdp_connection import SDPConnection
 from pacman103.core.spinnman.scp.scp_message import SCPMessage
@@ -21,12 +22,13 @@ UPDATE_TIMESTEP = 1          # s
 sim.setup(timestep=1.0,min_delay=1.0,max_delay=10.0)
 
 class TxThread(threading.Thread):
-    def __init__(self, board_address, update_timestep, dst_cpu, dst_x, dst_y):
+    def __init__(self, board_address, update_timestep, target_spike_source):
         # Superclass
         super(TxThread, self).__init__()
-        
+  
         # Cache timsetep
         self._updateTimestep = update_timestep
+        self._target_spike_source = target_spike_source
         
         # Create SDP connection to hist
         self._connection = SDPConnection(board_address)
@@ -44,30 +46,30 @@ class TxThread(threading.Thread):
         self._message.src_port = 255
         
         # Set destination
-        self._message.dst_cpu = dst_cpu
-        self._message.dst_x = dst_x
-        self._message.dst_y = dst_y
         self._message.dst_port = (1 << 5) | 1
-        
-        # Set key message will be transmitted from
-        # **TODO** get key from monitor vertex and combine with command
-        self._message.arg1 = 0
-        
-        # Set that message has a payload
-        # **THINK** is this actually correct
-        self._message.cmd_rc = 1
         
     def run(self):
         while(True):
             # Sleep a bit
             time.sleep(self._updateTimestep)
-       
+            
             # **TEMP** set mean ISI to random number
+            self._message.arg1 = 0
             self._message.arg2 = TxThread._doubleToS1516(4.0)
             
-            # Send message
-            self._connection.send(self._message)
-    
+            # Loop through target spike source's sub vertices
+            for subvertex in self._target_spike_source.vertex.subvertices:
+                # Get sub-vertex's placement and set as message destination
+                (x, y, p) = subvertex.placement.processor.get_coordinates()
+                self._message.dst_cpu = p
+                self._message.dst_x = x
+                self._message.dst_y = y
+                
+                print("Sending command to %u %u %u" % (x, y, p))
+                
+                # Send message
+                self._connection.send(self._message)
+        
     @staticmethod
     def _doubleToS1516(double):
         """
@@ -88,11 +90,13 @@ class TxThread(threading.Thread):
         
 
 # Create two test cell populations
-paddle_cell = sim.Population(PADDLE_CELL_POP_SIZE, SpikeSourcePoissonDynamic, {'rate': DEFAULT_RATE, 'start':0, 'duration':SIM_TIME})
-ball_cell = sim.Population(PADDLE_CELL_POP_SIZE, SpikeSourcePoissonDynamic, {'rate': DEFAULT_RATE, 'start':0, 'duration':SIM_TIME})
+paddle_cell = sim.Population(PADDLE_CELL_POP_SIZE, sim.SpikeSourcePoisson, {'rate': DEFAULT_RATE, 'start':0, 'duration':SIM_TIME}, label="paddle_cell")
+ball_cell = sim.Population(PADDLE_CELL_POP_SIZE, sim.SpikeSourcePoisson, {'rate': DEFAULT_RATE, 'start':0, 'duration':SIM_TIME}, label="v_cell")
+
+paddle_cell.record(visuliser_mode=modes.RASTER)
 
 # Create thread to transmit shit to board
-thread = TxThread("192.168.240.253", UPDATE_TIMESTEP, 1, 0, 0)
+thread = TxThread("192.168.240.253", UPDATE_TIMESTEP, paddle_cell)
 
 # Start thread and simulation
 thread.start()
